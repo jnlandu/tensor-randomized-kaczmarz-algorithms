@@ -10,12 +10,14 @@
 import torch
 import numpy as np
 
-from tensor_toolbox.CONFIG import DTYPE, device
+from tensor_toolbox.config import DTYPE, device
 from tensor_toolbox.tensorLinalg import (
     t_frobenius_norm,
     t_pinv_apply,
     t_product
 )
+
+from trk_algorithms.config import SEED
 
 
 def make_partitions(n, s=None, tau=10, sequential=True):
@@ -93,7 +95,7 @@ def rel_se(X, X_ref):
 # ------------------------------------------------------
 #  Make tensor problems for testing
 # ------------------------------------------------------
-def make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=1, dtype=dtype, device=device):
+def make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=SEED, dtype=DTYPE, device=device):
     """
     Build an inconsistent t-linear system:
       B = A * X_true + noise

@@ -9,7 +9,7 @@ import torch
 import numpy as np
 
 
-from tensor_toolbox.config import device, dtype
+from tensor_toolbox.config import device, DTYPE
 from tensor_toolbox.tensorLinalg import (
     t_product,
     t_transpose,
