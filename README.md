@@ -1,7 +1,7 @@
 ## A python package for tensor randomized Kaczmarz algorithms
 
 
-This repoistory implements several **randomized Kaczmarz-type algorithms for large-scale tensor linear equations under the t-product**, with a (particual) focus on inconsistent tensor problems.
+This repository implements several **randomized Kaczmarz-type algorithms for large-scale tensor linear equations under the t-product**, with a (particular) focus on inconsistent tensor problems.
 
 We implement the algorithms proposed in the following papers:
 
@@ -22,10 +22,10 @@ Tensors are multidimenssional arrrays that generalize matrices to higher dimensi
 - ["Tensor-tensor products with invertible linear transforms", Canyi Lu, Jiqing Bi, Shuchin Aeron, and Zhouchen Lin](https://arxiv.org/abs/1606.05535).
 
 
-Several problems can be formulated as tensor linear equations, which can be solve iteratively using a Kaczmarz-type method. For instance, image repainting, image deblurring, and video recovery can be formulated as tensor linear equations. Hence, they can be solved using the algorithms implemented in this package.
+Several problems can be formulated as tensor linear equations, which can be solve iteratively using a Kaczmarz-type methods. For instance, image inpainting, image deblurring, and video recovery can be formulated as tensor linear equations. Hence, they can be solved using the algorithms implemented in this package.
 
 
-We will add some example and documentation soon. For nowm you can check the detailed examples in the paper above. Also  check the repo [Tensor-Tensor-Toolbox](https://github.com/canyilu/Tensor-tensor-product-toolbox) for more details about the t-product and its applications.
+We will add some example and documentation soon. For now on you can check the detailed examples in the paper above and the references therein. Also  check the repo [Tensor-Tensor-Toolbox](https://github.com/canyilu/Tensor-tensor-product-toolbox) for more details about the t-product and its applications.
 
 
 ## Quick Start
