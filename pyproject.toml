@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trk-algorithms"
+version = "0.1.0"
+description = "A Python package for Tensor randomized Kaczmarz algorithms"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Jeremie Mabiala", email = "jnlandu@gmail.com"}
+]
+dependencies = [
+    "tensor_toolbox",
+]
+
+keywords = [
+    "tensor",
+    "Kaczmarz",
+    "t-product",
+    "numerical algorithms",
+    "randomized Kaczmarz",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+
+[project.urls]
+Homepage = "https://github.com/jnlandu/tensor-randomized-kaczmarz-algorithms"
+Repository = "https://github.com/jnlandu/tensor-randomized-kaczmarz-algorithms"
+
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["trk_algorithms*"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["__pycache__", "*.pyc"]
