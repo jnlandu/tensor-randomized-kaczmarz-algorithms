@@ -10,7 +10,7 @@
 import torch
 import numpy as np
 
-from tensor_toolbox.CONFIG import dtype, device
+from tensor_toolbox.CONFIG import DTYPE, device
 from tensor_toolbox.tensorLinalg import (
     t_frobenius_norm,
     t_pinv_apply,
