@@ -1,4 +1,4 @@
-## A python package for Tensor randomized Kaczmarz algorithms
+## A python package for tensor randomized Kaczmarz algorithms
 
 
 This repoistory implements several **randomized Kaczmarz-type algorithms for large-scale tensor linear equations under the t-product**, with a (particual) focus on inconsistent tensor problems.
