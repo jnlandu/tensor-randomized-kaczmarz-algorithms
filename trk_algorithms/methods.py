@@ -342,7 +342,7 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
     Algorithm 3: Tensor randomized extended greedy block Kaczmarz (TREGREBK).
 
     Require:
-      A ∈ R^{m×n×p}, B ∈ R^{m×k×p}, partitions {I1,...,Is} of [m], δ ∈ (0,1]
+      A ∈ R^{mxnxp}, B ∈ R^{mxkxp}, partitions {I1,...,Is} of [m], δ ∈ (0,1]
 
     Steps each iter:
       - Greedy column-block tau_k via energies || (A_{:,j,:})^T * Z ||_F^2
@@ -433,7 +433,8 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
         # 3) Pick a row-block I_i with probability ||A_I||_F^2 / ||A||_F^2
         # =======================================================
         blk_id = int(torch.multinomial(p_blocks, 1).item())
-        I = row_partitions[blk_id].to(A.device)
+        # I = row_partitions[blk_id].to(A.device)
+        I = row_partitions[blk_id]
 
         # =======================================================
         # 4) X update (extended Kaczmarz):
