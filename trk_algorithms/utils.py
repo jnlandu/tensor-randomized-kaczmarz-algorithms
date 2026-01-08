@@ -1,10 +1,17 @@
+"""
+Docstring for trk_algorithms.utils
+"""
+
 #  The utils.py contains the utilities functions such as :
-#  - rel_se: compute the relatve squared error between two tensors, mainly the iterate X_k and the least-square solution X_ls
-#  - make_partitions: create random partitions of the set of indices {0, ..., n-1} into p disjoint subsets. This method is mainly used for
+#  - rel_se: compute the relatve squared error between two tensors,
+#   mainly the iterate X_k and the least-square solution X_ls
+#  - make_partitions: create random partitions of the set of indices {0, ..., n-1} 
+# into p disjoint subsets. This method is mainly used for
 #    the block  averaging variants of the randomized Kaczmarz algorithms.
 
 
-#  The tensor toolbox is used for tensor operations under the t-product framework such as t-product, transpose, identity tensor, f-diagonal tensor, etc.
+#  The tensor toolbox is used for tensor operations under the t-product 
+# framework such as t-product, transpose, identity tensor, f-diagonal tensor, etc.
 #  The imports above imports automatically numpy and pytorch as well.
 
 import torch
@@ -131,3 +138,119 @@ def make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=SEED, dtype=DTYP
     X_ls = t_pinv_apply(A, B_incons)
 
     return A, X_ls, B_incons
+
+
+# ------------------------------------------------------
+#  Display benchmark results
+# ------------------------------------------------------
+def display_results(method_results):
+    """
+    Create and display a summary DataFrame of benchmark results for tensor Kaczmarz methods.
+    
+    Parameters:
+    -----------
+    method_results: list of dict
+        Each dict should contain:
+        - 'name': str, method name
+        - 'time': float, execution time in seconds
+        - 'final_residual': float, final relative residual
+        - 'iterations': int, number of iterations
+        
+    Example:
+    --------
+    >>> results = [
+    ...     {'name': 'TREK', 'time': t_trek, 'final_residual': hist_trek[-1], 'iterations': k_trek},
+    ...     {'name': 'TREABK', 'time': t_treabk, 'final_residual': hist_treabk[-1], 'iterations': k_treabk},
+    ... ]
+    >>> display_benchmark_results(results)
+    """
+    import pandas as pd
+    
+    # Extract data from method_results
+    methods = [result['name'] for result in method_results]
+    times = [result['time'] for result in method_results]
+    residuals = [result['final_residual'] for result in method_results]
+    iterations = [result['iterations'] for result in method_results]
+    
+    # Create DataFrame
+    results = pd.DataFrame({
+        'Method': methods,
+        'Time (s)': times,
+        'Final Relative Residual': residuals,
+        'Iterations': iterations
+    })
+    
+    # Display results
+    print("=" * 90)
+    print("BENCHMARK RESULTS - TENSOR KACZMARZ METHODS (Using T-Product)")
+    print("=" * 90)
+    print(results.to_string(index=False))
+    print("=" * 90)
+    
+    return results
+
+
+# ------------------------------------------------------
+#  Plot convergence results
+# ------------------------------------------------------
+def plot_convergence(method_histories, figsize=(11, 7), save_path=None):
+    """
+    Plot convergence histories for tensor Kaczmarz methods.
+    
+    Parameters:
+    -----------
+    method_histories: list of dict
+        Each dict should contain:
+        - 'name': str, method name for legend
+        - 'history': array-like, convergence history (e.g., relative residual errors)
+        - 'iterations': int, number of iterations
+        - 'linewidth': float, optional (default: 2)
+        - 'linestyle': str, optional (default: '-')
+        - 'marker': str, optional (default: 'o')
+        - 'markersize': float, optional (default: 3)
+    figsize: tuple, optional
+        Figure size (width, height) in inches. Default is (11, 7).
+    save_path: str, optional
+        If provided, save the figure to this path (e.g., 'convergence.png').
+        
+    Example:
+    --------
+    >>> histories = [
+    ...     {'name': 'TREK', 'history': hist_trek, 'iterations': k_trek},
+    ...     {'name': 'TREGREBK', 'history': hist_tregrebk, 'iterations': k_tregrebk, 'marker': 'd'},
+    ...     {'name': 'TGDBEK (faithful)', 'history': hist_tgdbek_f, 'iterations': k_tgdbek_f, 
+    ...      'linewidth': 2.5, 'linestyle': '--', 'marker': 'd'}
+    ... ]
+    >>> plot_convergence(histories)
+    """
+    import matplotlib.pyplot as plt
+    
+    plt.figure(figsize=figsize)
+    
+    for method in method_histories:
+        name = method['name']
+        history = method['history']
+        iters = method['iterations']
+        linewidth = method.get('linewidth', 2)
+        linestyle = method.get('linestyle', '-')
+        marker = method.get('marker', 'o')
+        markersize = method.get('markersize', 3)
+        
+        # Calculate marker spacing
+        markevery = max(1, len(history) // 20)
+        
+        # Plot convergence history
+        plt.semilogy(history, label=f'{name} - {iters} iters', 
+                    linewidth=linewidth, linestyle=linestyle,
+                    marker=marker, markersize=markersize, markevery=markevery)
+    
+    plt.xlabel('IT', fontsize=13)
+    plt.ylabel('RSE', fontsize=13)
+    plt.legend(fontsize=11, loc='upper right')
+    plt.tight_layout()
+    
+    # Save figure if path is provided
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    
+    plt.show()

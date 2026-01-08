@@ -1,3 +1,4 @@
 tensor_toolbox
-pylint ## if you want to use pylint for code analysis
-autopep8 ## if you want to use autopep8 for code formatting
+pandas
+pylint     ## if you want to use pylint for code analysis
+autopep8   ## if you want to use autopep8 for code formatting
