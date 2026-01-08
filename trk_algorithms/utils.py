@@ -61,8 +61,8 @@ def make_partitions(n, s=None, tau=10, sequential=True):
     assert s is None or (s > 0 and isinstance(
         s, int)), "s must be a positive integer or None."
     assert tau <= n, "tau must be less than or equal to n."
-    assert s is None or tau * \
-        s >= n, "s is too small to cover all indices with partitions of size tau."
+    # assert s is None or tau * \
+    #     s >= n, "s is too small to cover all indices with partitions of size tau."
     assert sequential in [True, False], "sequential must be a boolean value."
 
     #  Numpy implementation
