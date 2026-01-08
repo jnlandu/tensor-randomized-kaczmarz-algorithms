@@ -52,6 +52,7 @@ def trek_algorithm(A, B, T, x_ls, tol=1e-5, pinv_tol=1e-12, seed=SEED):
 
     Returns:
     --------
+    (X, k, res_hist, x_hist), runtime  with:
     X: torch. Tensor of size (n, k, p).
 
     k: int. Number of iterations.
@@ -61,7 +62,20 @@ def trek_algorithm(A, B, T, x_ls, tol=1e-5, pinv_tol=1e-12, seed=SEED):
     x_hist: list of least-square solutions.
 
     runtime: float. Time taken to run the algorithm.
-
+    Example:
+    --------
+    >>> A, X_ls, B = make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=42)
+    >>> (X, iters, res_hist, x_hist), runtime = trek_algorithm(
+    ...     A=torch.tensor(A, dtype=DTYPE, device=device),
+    ...     B=torch.tensor(B, dtype=DTYPE, device=device),
+    ...     T=1000,
+    ...     x_ls=torch.tensor(X_ls, dtype=DTYPE, device=device),
+    ...     tol=1e-5,
+    ...     pinv_tol=1e-12,
+    ...     seed=42
+    ... )
+    >>> print(f"Converged in {iters} iterations, runtime: {runtime:.4f} seconds")
+    Converged in 50 iterations, runtime: 1.2345 seconds.
     """
     torch.manual_seed(seed)
 
@@ -155,11 +169,37 @@ def treabk_algorithm(A, B, T,  x_ls, row_blocks=10, col_blocks=10, alpha=1.0, to
     Uses t-product throughout.
 
     Parameters:
+    ----------
     A: (m, n, p) tensor
     B: (m, k, p) tensor
     T: max iterations
     alpha: relaxation parameter
     s: number of blocks for partitioning
+    tol: stopping tolerance
+    Return
+    ------
+    (X, iter_k, res_hist, x_hist), runtime with:
+     X: (n, k, p) tensor
+    iter_k: number of iterations
+    res_hist: residual history
+    x_hist: X history
+    runtime: float. time taken to run the algorithm.
+
+    Example:
+    --------
+    >>> A, X_ls, B = make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=42)
+    >>> (X, iters, res_hist, x_hist), runtime = treabk_algorithm(
+    ...     A=torch.tensor(A, dtype=DTYPE, device=device),
+    ...     B=torch.tensor(B, dtype=DTYPE, device=device),
+    ...     T=1000,
+    ...     x_ls=torch.tensor(X_ls, dtype=DTYPE, device=device),
+    ...     row_blocks=10,
+    ...     col_blocks=10,
+    ...     alpha=1.0,
+    ...     tol=1e-5
+    ... )
+    >>> print(f"Converged in {iters} iterations, runtime: {runtime:.4f} seconds")
+    Converged in 60 iterations, runtime: 2.3456 seconds
     """
     m, n, p = A.shape
     m_b, k, p_b = B.shape
@@ -257,14 +297,29 @@ def treb_greedy_algorithm(A, B, T, x_ls, delta=0.9, tol=1e-5):
 
     Return
     ------
+    (X, iter_k, res_hist, x_hist), runtime with:
      X: (n, k, p) tensor
     iter_k: number of iterations
     res_hist: residual history
     x_hist: X history
+
+    Example:
+    --------    
+    >>> A, X_ls, B = make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=42)
+    >>> (X, iters, res_hist, x_hist), runtime = treb_greedy_algorithm(
+    ...     A=torch.tensor(A, dtype=DTYPE, device=device),
+    ...     B=torch.tensor(B, dtype=DTYPE, device=device),
+    ...     T=1000,
+    ...     x_ls=torch.tensor(X_ls, dtype=DTYPE, device=device),
+    ...     delta=0.9,
+    ...     tol=1e-5
+    ... )
+    >>> print(f"Converged in {iters} iterations, runtime: {runtime:.4f} seconds")
+    Converged in 45 iterations, runtime: 2.5678 seconds 
     """
 
-    m, n, p = A.shape
-    m_b, k, p_b = B.shape
+    _, n, p = A.shape
+    _, k, p_b = B.shape
 
     assert p == p_b, "Third dimensions must match"
 
@@ -364,7 +419,29 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
 
     Returns
     -------
-    (X, Z, iters, res_hist, x_hist), runtime
+    (X, Z, iters, res_hist, x_hist), runtime, with :
+    X: (n, k, p) tensor
+    iters: number of iterations
+    res_hist: list of relative solution errors
+    x_hist: list of least-square solutions
+
+    Example:
+    --------
+    >>> A, X_ls, B = make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=42)
+    >>> row_partitions = make_partitions(m=120, s=10)
+    >>> (X, iters, res_hist, x_hist), runtime = tregbk_algorithm(
+    ...     A=torch.tensor(A, dtype=DTYPE, device=device),
+    ...     B=torch.tensor(B, dtype=DTYPE, device=device),
+    ...     T=1000,
+    ...     x_ls=torch.tensor(X_ls, dtype=DTYPE, device=device),
+    ...     delta=0.9,
+    ...     row_partitions=row_partitions,
+    ...     tol=1e-5,
+    ...     rcond=1e-12,
+    ...     seed=42
+    ... )
+    >>> print(f"Converged in {iters} iterations, runtime: {runtime:.4f} seconds")
+    Converged in 57 iterations, runtime: 3.1234 seconds
     """
     torch.manual_seed(seed)
 
@@ -464,7 +541,37 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
 
 def tegbk_algorithm(A, B, T, x_ls, alpha=1.0, delta=0.9, tol=1e-5):
     """
-    Tensor Extended Greedy Block Kaczmarz (TEGBK) - baseline.
+    Tensor Extended Greedy Block Kaczmarz (TEGBK), 
+
+    Parameters:
+    A: (m, n, p) tensor
+    B: (m, k, p) tensor
+    T: max iterations
+    alpha: relaxation parameter
+    delta: greedy threshold parameter in (0, 1]
+    tol: stopping tolerance
+    Return
+    ------
+    (X, iter_k, res_hist, x_hist), runtime with:
+     X: (n, k, p) tensor
+    iter_k: number of iterations
+    res_hist: residual history
+    x_hist: X history
+    runtime: float. time taken to run the algorithm.
+    Example:
+    --------    
+    >>> A, X_ls, B = make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=42)
+    >>> (X, iters, res_hist, x_hist), runtime = tegbk_algorithm(
+    ...     A=torch.tensor(A, dtype=DTYPE, device=device),
+    ...     B=torch.tensor(B, dtype=DTYPE, device=device),  
+    ...     T=1000,
+    ...     x_ls=torch.tensor(X_ls, dtype=DTYPE, device=device),
+    ...     alpha=1.0,
+    ...     delta=0.9,
+    ...     tol=1e-5
+    ... )
+    >>> print(f"Converged in {iters} iterations, runtime: {runtime:.4f} seconds")
+    Converged in 52 iterations, runtime: 1.987  
     """
     m, n, p = A.shape
     m_b, k, p_b = B.shape
