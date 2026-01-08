@@ -43,6 +43,18 @@ def make_partitions(n, s=None, tau=10, sequential=True):
 
     Returns:
     list: A list containing s lists, each representing a partition of indices.
+
+    Example:
+    --------
+    >>> partitions = make_partitions(n=20, s=4, tau=5, sequential=True)
+    >>> print(partitions)
+    [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9], [10, 11, 12, 13, 14], [15, 16, 17, 18, 19]]
+    >>> partitions = make_partitions(n=20, s=4, tau=5, sequential=False)
+    >>> print(partitions)
+    [array([12,  1,  7, 19,  3,  5,  0, 15,  9, 14]), array([ 4, 11, 17, 10, 13]), array([ 6, 16,  2, 18]), array([8])]
+    >>> partitions = make_partitions(n=23, s=None, tau=6, sequential=True)
+    >>> print(partitions)
+    [[0, 1, 2, 3, 4, 5], [6, 7, 8, 9, 10, 11], [12, 13, 14, 15, 16, 17], [18, 19, 20, 21, 22]]
     """
     assert n > 0 and isinstance(n, int), "n must be a positive integer."
     assert tau > 0 and isinstance(tau, int), "tau must be a positive integer."
@@ -89,7 +101,16 @@ def rel_se(X, X_ref):
 
     Returns:
     --------
-    t_frobenius_norm(X - X_ref) / (t_frobenius_norm(X_ref) + 1e-12)
+    rse: float. relative solution error.
+
+    Example:
+    --------
+    >>> X = torch.randn(80, 4, 8)
+    >>> X_ref = torch.randn(80, 4, 8)
+    >>> rse = rel_se(X, X_ref)
+    >>> print(f"Relative solution error: {rse:.6f}")
+    Relative solution error: 1.234567
+
     """
 
     diff = X - X_ref
@@ -109,20 +130,30 @@ def make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=SEED, dtype=DTYP
 
     Parameters:
     ----------
-    m: int
-    n: int
-    p: int
-    q: int
-    noise: float
-    seed: int
-    dtype: torch.dtype
-    device: torch.device
+    m: int. number of rows
+    n: int. number of columns
+    p: int. tubal dimension
+    q: int. number of right-hand sides
+    noise: float. noise level
+    seed: int. random seed
+    dtype: torch.dtype. data type
+    device: torch.device. device to use
 
     Returns:
     --------
-    A: (m, n, p) tensor
-    X_ls: (n, q, p) tensor
-    B: (m, q, p) tensor
+    A: (m, n, p) tensor.  coefficient tensor
+    X_ls: (n, q, p) tensor. least-square solution
+    B: (m, q, p) tensor. right-hand side tensor (inconsistent)
+
+    Example:
+    --------
+    >>> A, X_ls, B = make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=42)
+    >>> A.shape
+    torch.Size([120, 80, 8])
+    >>> X_ls.shape
+    torch.Size([80, 4, 8])
+    >>> B.shape
+    torch.Size([120, 4, 8])
     """
 
     # if device is None:
