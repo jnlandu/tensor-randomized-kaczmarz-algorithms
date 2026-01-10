@@ -19,6 +19,7 @@ from tensor_toolbox.tensorLinalg import (
 )
 from trk_algorithms.utils import (
     make_partitions,
+    partitions_to_torch,
     rel_se
 )
 
@@ -402,7 +403,7 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
       A ∈ R^{mxnxp}, B ∈ R^{mxkxp}, partitions {I1,...,Is} of [m], δ ∈ (0,1]
 
     Steps each iter:
-      - Greedy column-block tau_k via energies || (A_{:,j,:})^T * Z ||_F^2
+      - Greedy column-block tau_k via u_norms || (A_{:,j,:})^T * Z ||_F^2
       - Z <- Z - A_{:,tau,:} * (A_{:,tau,:})^† * Z
       - Pick a row-block I_i with probability ||A_{I_i,:,:}||_F^2 / ||A||_F^2
       - X <- X - (A_{I_i,:,:})^† * (A_{I_i,:,:}*X - B_{I_i,:,:} + Z_{I_i,:,:})
@@ -426,6 +427,9 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
     iters: number of iterations
     res_hist: list of relative solution errors
     x_hist: list of least-square solutions
+
+    When row_partitions is None, default to 10 partitions of equal size.
+    In this case, the partitions are randomly generated, after a permutation of the row indices.
 
     Example:
     --------
@@ -456,81 +460,99 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
     # with  size ~=10
     if row_partitions is None:
         row_partitions = make_partitions(m, s=10, sequential=False)
+        # Convertis les partitions en torch.long
+        row_partitions = partitions_to_torch(row_partitions, device=device)
+    else:
+        #  Convertis les indices des partitions en torch.long
+        row_partitions = partitions_to_torch(row_partitions, device=device)
 
-    # row_partitions = make_partitions(m, s=len(row_partitions), sequential=sequential)
-    # Initialize
-    X = torch.zeros(n, k, p, dtype=A.dtype, device=A.device)
-    Z = B.clone()
-
-    # Precompute column tube norms for sampling/normalization if needed
-    # if torch.is_complex(A):
-    #     absA2 = (A.conj() * A).real
-    # else:
-    absA2 = A * A
 
     # Row-block probabilities: ||A_{I_i,:,:}||_F^2 / ||A||_F^2
-    A_frob2 = absA2.sum() + 1e-12
+    row_norms_sq = torch.sum(A**2, dim=(1, 2)).to(torch.float32)  # (m,)
+    block_norms  = torch.stack([row_norms_sq[I].sum() for I in row_partitions]).to(A.device) # (s,)
+    prob_blocks = (block_norms / block_norms.sum()).to(torch.float32 )  # (s,)  
     block_norm2_list = []
+    #  ----- A supprimer 
+    absA2 = A * A
     for I in row_partitions:
         block_norm2_list.append(absA2[I, :, :].sum() + 1e-12)
     block_norm2 = torch.stack(block_norm2_list).to(A.device)
     p_blocks = (block_norm2 / block_norm2.sum()).to(torch.float32)
+    #  -----
+
+    # Initialize
+    X = torch.zeros(n, k, p, dtype=DTYPE, device=A.device)
+    Z = B.clone()
 
     res_hist = []
     x_hist = []
-    denomB = torch.linalg.norm(B.reshape(-1)) + 1e-12
+
 
     t0 = time.time()
     for iter_k in range(T):
 
         # =======================================================
         # 1) Greedy column-block selection tau_k using current Z
-        #    energy_j = || (A_{:,j,:})^T * Z ||_F^2
+        #    u_norms[j] = || (A_{:,j,:})^T * Z ||_F^2
         # =======================================================
-        energies = torch.zeros(n, device=A.device, dtype=torch.float32)
+        u_norms = torch.zeros(n, device=A.device, dtype=torch.float32)
 
-        for j in range(n):
-            A_col = A[:, j:j+1, :]                 # (m,1,p)
-            # (1,m,p)  (your t_transpose)
-            A_col_T = t_transpose(A_col)
-            u_j = t_product(A_col_T, Z)            # (1,k,p)
-            # squared Frobenius norm
-            energies[j] = (t_frobenius_norm(u_j) ** 2).to(torch.float32)
+        # I must vectorize this loop. 
+        # Vectorize version of the  this loop
+        trans_A = t_transpose(A)  # (n,m,p)
+        trans_AZ = t_product(trans_A, Z)  # (n,k,p) =  (n, m, p) * (m, k, p) = (n, k, p)
+        u_norms = (t_frobenius_norm(trans_AZ, dim=(1, 2)) ** 2).to(torch.float32)  # (n,)
+        
+        eps_z = delta * torch.max(u_norms)
+        tau = torch.where(u_norms >= eps_z)[0]
 
-        thr = delta * energies.max()
-        tau = torch.where(energies >= thr)[0]
-        if tau.numel() == 0:
-            tau = torch.tensor(
-                [int(torch.argmax(energies).item())], device=A.device)
+
+        # for j in range(n):
+        #     A_col = A[:, j:j+1, :]                 # (m,1,p)
+        #     A_col_T = t_transpose(A_col)
+        #     u_j = t_product(A_col_T, Z)            # (1,k,p)
+        #     # squared Frobenius norm
+        #     u_norms[j] = (t_frobenius_norm(u_j) ** 2).to(torch.float32)
+
+        # thr = delta * u_norms.max()
+        # tau = torch.where(u_norms >= thr)[0]
+        # if tau.numel() == 0:
+        #     tau = torch.tensor(
+        #         [int(torch.argmax(u_norms).item())], device=A.device)
 
         # =======================================================
-        # 2) Z update: Z <- Z - A_{:,tau,:} * (A_{:,tau,:})^† * Z
+        # 5) Z update: Z <- Z - A_{:,tau,:} * (A_{:,tau,:})^† * Z
         # =======================================================
-        A_tau = A[:, tau, :]                        # (m, |tau|, p)
-        X_tau = t_pinv_apply(A_tau, Z, rcond=rcond)  # (|tau|, k, p)
-        Z = Z - t_product(A_tau, X_tau)             # (m, k, p)
+        A_tau = A[:, tau, :]                            # (m, |tau|, p)
+        A_tau_Z = t_pinv_apply(A_tau, Z, rcond=rcond)   # (|tau|, k, p)
+        Z = Z - t_product(A_tau, A_tau_Z)               # (m, k, p)
 
         # =======================================================
-        # 3) Pick a row-block I_i with probability ||A_I||_F^2 / ||A||_F^2
+        # 6) Pick a row-block I_i with probability ||A_I||_F^2 / ||A||_F^2
         # =======================================================
-        blk_id = int(torch.multinomial(p_blocks, 1).item())
+        row_block_idx = int(torch.multinomial(prob_blocks, 1).item())
         # I = row_partitions[blk_id].to(A.device)
-        I = row_partitions[blk_id]
+        I = row_partitions[row_block_idx]
 
         # =======================================================
-        # 4) X update (extended Kaczmarz):
+        # 7) X update (extended Kaczmarz):
         #    X <- X - (A_I)^† * (A_I*X - B_I + Z_I)
         # =======================================================
-        A_I = A[I, :, :]                              # (|I|, n, p)
-        rhs = t_product(A_I, X) - B[I, :, :] + Z[I, :, :]   # (|I|, k, p)
-        step = t_pinv_apply(A_I, rhs, rcond=rcond)          # (n, k, p)
+        A_I = A[I, :, :]                                    # (|I|, n, p)
+        A_I_X = t_product(A_I, X)                           # (|I|, k, p)
+        R_I = A_I_X - B[I, :, :] + Z[I, :, :]               # (|I|, k, p)
+        step = t_pinv_apply(A_I, R_I, rcond=rcond)          # (n, k, p)
         X = X - step
+
+        #  -------- Monitoring  the RSE  ----------
+        assert x_ls is not None, "x_ls (least-square solution) must be provided for RSE computation."
 
         rse = rel_se(X, x_ls)
         res_hist.append(rse.item())
 
         x_hist.append(X.clone())
 
+        #  Check convergence
         if rse < tol:
             break
 
