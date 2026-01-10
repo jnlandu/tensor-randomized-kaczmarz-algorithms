@@ -27,7 +27,7 @@ from tensor_toolbox.tensorLinalg import (
 from trk_algorithms.config import SEED
 
 
-def make_partitions(n, s=None, tau=10, sequential=True):
+def make_partitions(n, s=None, tau=2, sequential=True):
     """
     Create a partitions of the set of indices {0, ..., n-1} into s disjoint subsets.
     If random is True, the partitions are created randomly.
@@ -44,6 +44,16 @@ def make_partitions(n, s=None, tau=10, sequential=True):
     Returns:
     list: A list containing s lists, each representing a partition of indices.
 
+    If s is None and sequential is True, s is computed as ceil(n/tau). 
+    And the partitions are created sequentially, as follows:
+     I_i  is formed as  I_i = {(i-1)tau +1, (i-1)tau +2, ..., i*tau} for i=1,...,s-1 and I_s = {(s-1)tau +1, ..., n}.
+    
+    if s is not None and sequential is True, the partitions are created sequentially, as follows:
+     I_i  is formed as  I_i = {(i-1)tau +1, (i-1)tau +2, ..., i*tau} for i=1,...,s-1 and I_s = {(s-1)tau +1, ..., n}.
+
+    If sequential is False, the partitions are created randomly, by randomly permuting the indices 
+    {0, ..., n-1} and splitting them into s disjoint subsets of (not necessarily equal) size.
+
     Example:
     --------
     >>> partitions = make_partitions(n=20, s=4, tau=5, sequential=True)
@@ -58,36 +68,69 @@ def make_partitions(n, s=None, tau=10, sequential=True):
     """
     assert n > 0 and isinstance(n, int), "n must be a positive integer."
     assert tau > 0 and isinstance(tau, int), "tau must be a positive integer."
-    assert s is None or (s > 0 and isinstance(
-        s, int)), "s must be a positive integer or None."
-    assert tau <= n, "tau must be less than or equal to n."
+    # assert s is None or (s > 0 and isinstance(
+    #     s, int)), "s must be a positive integer or None."
+    # assert tau <= n, "tau must be less than or equal to n."
     # assert s is None or tau * \
-    #     s >= n, "s is too small to cover all indices with partitions of size tau."
+    #     s <= n, "tau * s must be less than or equal to n."
     assert sequential in [True, False], "sequential must be a boolean value."
 
     #  Numpy implementation
-    if s is None and sequential:
-        s = int(np.ceil(n / tau))
-
-    #  Create the partitions following Due et al (2024) REBK paper
-    #  I_i  is formed as  I_i = {(i-1)tau +1, (i-1)tau +2, ..., i*tau} for i=1,...,s-1 and I_s = {(s-1)tau +1, ..., n}.
-        partitions = [[(i - 1)*tau + j for j in range(1, tau + 1)]
-                      for i in range(1, s)]
-        return partitions
-
     if sequential:
-        partitions = [[(i - 1)*tau + j for j in range(1, tau + 1)]
-                      for i in range(1, s)]
+        if s is None:
+            s = int(np.ceil(n / tau))
+        else:
+            #  Assert that
+            assert tau* (s-1) <= n, "Need tau * (s-1)<= n for remainder block."
 
-        return partitions
-    else:
-        # Randonmly generate s partitions of {0, ..., n-1}of not (necessarily) equal size
+        #  Create the partitions following Due et al (2024) REBK paper
+        #  I_i  is formed as  I_i = {(i-1)tau +1, (i-1)tau +2, ..., i*tau} for i=1,...,s-1 and I_s = {(s-1)tau +1, ..., n}.
+        parts = []
+        for i in range(s):
+            start = i * tau
+            end = min( (i+1) * tau, n )
 
-        indices = np.random.permutation(n)
-        #  Partitiion the indices into s disjoint subsets of  not (necessarily) equal size
+            if start < n:
+                part = list(range(start, end))
+                parts.append(part)
+        return parts
+    
+    # If sequential is False, create random partitions
+    rng = np.random.default_rng(seed=SEED)
+    indices = rng.permutation(n)
+    if s is None:
+        # Determine number of partitions based on tau
+        s = int(np.ceil(n / tau))
         partitions = np.array_split(indices, s)
+    else:
+        partitions = np.array_split(indices, s)
+    return [parts.tolist() for parts in partitions]
 
-    return partitions
+    # if sequential:
+    #     partitions = [[(i - 1)*tau + j for j in range(1, tau + 1)]
+    #                   for i in range(0, s)]
+
+    #     return partitions
+    # else:
+    #     # Randonmly generate s partitions of {0, ..., n-1}of not (necessarily) equal size
+
+    #     indices = np.random.permutation(n)
+    #     #  Partitiion the indices into s disjoint subsets of  not (necessarily) equal size
+    #     partitions = np.array_split(indices, s)
+
+    # return partitions
+
+def partitions_to_torch(parts, device):
+    """
+    Convert list[list[int]] -> list[torch.LongTensor] on 'device'.
+    
+    Parameters:
+    -----------
+    parts: list of list of int. Partitions to convert.
+    device: torch.device. Device to use.
+    
+    """
+    return [torch.tensor(I, dtype=torch.long, device=device) for I in parts]
 
 
 def rel_se(X, X_ref):
