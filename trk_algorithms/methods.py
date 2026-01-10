@@ -370,14 +370,9 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
     row_norms_sq = torch.sum(A**2, dim=(1, 2)).to(torch.float32)  # (m,)
     block_norms  = torch.stack([row_norms_sq[I].sum() for I in row_partitions]).to(A.device) # (s,)
     prob_blocks = (block_norms / block_norms.sum()).to(torch.float32 )  # (s,)  
-    block_norm2_list = []
-    #  ----- A supprimer 
-    absA2 = A * A
-    for I in row_partitions:
-        block_norm2_list.append(absA2[I, :, :].sum() + 1e-12)
-    block_norm2 = torch.stack(block_norm2_list).to(A.device)
-    p_blocks = (block_norm2 / block_norm2.sum()).to(torch.float32)
-    #  -----
+
+    #  Precompute A^T 
+    At = t_transpose(A) # (n,m,p)
 
     # Initialize
     X = torch.zeros(n, k, p, dtype=DTYPE, device=A.device)
@@ -392,33 +387,17 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
 
         # =======================================================
         # 1) Greedy column-block selection tau_k using current Z
-        #    u_norms[j] = || (A_{:,j,:})^T * Z ||_F^2
+        #    u_n = || (A_{:,j,:})^T * Z ||_F^2
         # =======================================================
-        u_norms = torch.zeros(n, device=A.device, dtype=torch.float32)
 
-        # I must vectorize this loop. 
+        # I must vectorize this loop.  I noticed an error in this algorithm description in the paper.
+        # They ddefinee || A(:,j,:)*Z||_F^2, which is incorrect.
         # Vectorize version of the  this loop
-        trans_A = t_transpose(A)  # (n,m,p)
-        trans_AZ = t_product(trans_A, Z)  # (n,k,p) =  (n, m, p) * (m, k, p) = (n, k, p)
-        u_norms = (t_frobenius_norm(trans_AZ, dim=(1, 2)) ** 2).to(torch.float32)  # (n,)
-        
-        eps_z = delta * torch.max(u_norms)
-        tau = torch.where(u_norms >= eps_z)[0]
-
-
-        # for j in range(n):
-        #     A_col = A[:, j:j+1, :]                 # (m,1,p)
-        #     A_col_T = t_transpose(A_col)
-        #     u_j = t_product(A_col_T, Z)            # (1,k,p)
-        #     # squared Frobenius norm
-        #     u_norms[j] = (t_frobenius_norm(u_j) ** 2).to(torch.float32)
-
-        # thr = delta * u_norms.max()
-        # tau = torch.where(u_norms >= thr)[0]
-        # if tau.numel() == 0:
-        #     tau = torch.tensor(
-        #         [int(torch.argmax(u_norms).item())], device=A.device)
-
+        AtZ  = t_product(At, Z)                    # (n,k,p) = (n,m,p) * (m,k,p)
+        Atz_norms_sq = torch.sum(AtZ**2, dim=(1,2)).to(torch.float32)  # (n,)
+        eps = delta * torch.max(Atz_norms_sq)
+        tau = torch.where(Atz_norms_sq >= eps)[0]
+       
         # =======================================================
         # 5) Z update: Z <- Z - A_{:,tau,:} * (A_{:,tau,:})^† * Z
         # =======================================================
@@ -429,13 +408,11 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
         # =======================================================
         # 6) Pick a row-block I_i with probability ||A_I||_F^2 / ||A||_F^2
         # =======================================================
-        row_block_idx = int(torch.multinomial(prob_blocks, 1).item())
-        # I = row_partitions[blk_id].to(A.device)
-        I = row_partitions[row_block_idx]
+        i = int(torch.multinomial(prob_blocks, 1).item())
+        I = row_partitions[i]
 
         # =======================================================
-        # 7) X update (extended Kaczmarz):
-        #    X <- X - (A_I)^† * (A_I*X - B_I + Z_I)
+        # 7) X update : X <- X - (A_I)^† * (A_I*X - B_I + Z_I)
         # =======================================================
         A_I = A[I, :, :]                                    # (|I|, n, p)
         A_I_X = t_product(A_I, X)                           # (|I|, k, p)
