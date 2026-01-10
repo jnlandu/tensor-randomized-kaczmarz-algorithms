@@ -175,7 +175,8 @@ def treabk_algorithm(A, B, T,  x_ls, row_partitions=None, col_partitions=None, a
     B: (m, k, p) tensor
     T: max iterations
     alpha: relaxation parameter
-    s: number of blocks for partitioning
+    row_partitions: list of LongTensor index blocks (partition of rows). If None: 2 blocks.
+    col_partitions: list of LongTensor index blocks (partition of columns). If None: 2 blocks.
     tol: stopping tolerance
     Return
     ------
@@ -186,23 +187,30 @@ def treabk_algorithm(A, B, T,  x_ls, row_partitions=None, col_partitions=None, a
     x_hist: X history
     runtime: float. time taken to run the algorithm.
 
-
+    If the row_partitions is None, default to 2 partitions of size 2.
+    If the col_partitions is None, default to 2 partitions of size 2.
+    In this case, the partitions are randomly generated, after a permutation of the row/column indices.
 
     Example:
     --------
     >>> A, X_ls, B = make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=42)
-    >>> (X, iters, res_hist, x_hist), runtime = treabk_algorithm(
-    ...     A=torch.tensor(A, dtype=DTYPE, device=device),
-    ...     B=torch.tensor(B, dtype=DTYPE, device=device),
-    ...     T=1000,
-    ...     x_ls=torch.tensor(X_ls, dtype=DTYPE, device=device),
-    ...     row_blocks=10,
-    ...     col_blocks=10,
+    >>> row_partitions = make_partitions(m=120, s=2, tau=2)
+    >>> col_partitions = make_partitions(n=80, s=2, tau=2)
+    >>> (X, iters, res_hist, x_hist), runtime = treabk_algorithm( A,B,T=1000,X_ls,row_partitions=row_partitions,
+    ...     col_partitions=col_partitions,
     ...     alpha=1.0,
     ...     tol=1e-5
     ... )
     >>> print(f"Converged in {iters} iterations, runtime: {runtime:.4f} seconds")
-    Converged in 60 iterations, runtime: 2.3456 seconds
+      Converged in 60 iterations, runtime: 2.3456 seconds
+    >>> ## Plot the convergence 
+    >>> import matplotlib.pyplot as plt
+    >>> plt.semilogy(res_hist)
+    >>> plt.xlabel('Iteration')
+    >>> plt.ylabel('Relative Solution Error (RSE)')
+    >>> plt.title('Convergence of TREABK Algorithm')
+    >>> plt.grid()
+    >>> plt.show()
     """
     m, n, p = A.shape
     m_b, k, p_b = B.shape
@@ -251,25 +259,7 @@ def treabk_algorithm(A, B, T,  x_ls, row_partitions=None, col_partitions=None, a
 
     #  Initialize row and column norms for blocks
     X = torch.zeros(n, k, p, dtype=A.dtype, device=A.device)  # (n,k,p) 
-    Z = B.clone()  # (m,k,p)
-
-    # Compute row norms: ||A_{I,:,:}||_F^2
-    # row_norms_sq_list = []
-    # for I in I_blocks:
-    #     row_norms_sq_list.append((A[I, :, :] * A[I, :, :]).sum())
-    # row_norms_sq = torch.stack(row_norms_sq_list).to(A.device) + 1e-12
-
-    # # Compute column norms: ||A_{:,J,:}||_F^2
-    # col_norms_sq_list = []
-    # for J in J_blocks:
-    #     col_norms_sq_list.append((A[:, J, :] * A[:, J, :]).sum())
-    # col_norms_sq = torch.stack(col_norms_sq_list).to(A.device) + 1e-12
-
-    # # Column probabilities:
-    # prob_cols = col_norms_sq / col_norms_sq.sum()
-
-    # # Row probabilities
-    # prob_rows = row_norms_sq / row_norms_sq.sum()
+    Z = B.clone()                                             # (m,k,p)
 
     res_hist = []
     x_hist = []
@@ -322,7 +312,6 @@ def treabk_algorithm(A, B, T,  x_ls, row_partitions=None, col_partitions=None, a
     # Convert final X to CPU numpy array
     X_np = X.detach().cpu().numpy()
     return (X_np, iter_k + 1, np.array(res_hist), np.array([x.cpu().numpy() for x in x_hist])), runtime
-
 
 # --------------------------------------------------
 #  Tensor Randomized Extended Greedy Block Kaczmarz
