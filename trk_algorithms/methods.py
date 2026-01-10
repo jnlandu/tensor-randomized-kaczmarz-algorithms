@@ -4,7 +4,7 @@
 trk_algorithms/methods.py
 Implementation of Tensor Randomized Kaczmarz Algorithms
 """
-
+import time
 import torch
 import numpy as np
 
@@ -24,7 +24,7 @@ from trk_algorithms.utils import (
 )
 
 from trk_algorithms.config import SEED
-import time
+
 
 
 # ---------- Methods from the paper: 
@@ -268,7 +268,7 @@ def trebk_algorithm(A, B, T, x_ls, row_partitions=None, col_partitions=None,tol=
 
         # Update z: Z = Z - A(:,J,:) * (A(:,J,:)^T * A(:,J,:))^† *  Z)
         A_J = A[:, J, :]                     # (m, |J|, p)
-        A_J_T = t_transpose(A_J)             # (|J|, m, p)
+        # A_J_T = t_transpose(A_J)             # (|J|, m, p)
         AJZ = t_pinv_apply(A_J, Z)           # (|J|, k, p)
         Z = Z - t_product(A_J, AJZ)          # (m,k,p)
 
