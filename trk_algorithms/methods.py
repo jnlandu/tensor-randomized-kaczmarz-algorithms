@@ -163,7 +163,7 @@ def trek_algorithm(A, B, T, x_ls, tol=1e-5, pinv_tol=1e-12, seed=SEED):
 #  Tensor Randomized Extended Average Block Kaczmarz
 # -----------------------------------------
 
-def treabk_algorithm(A, B, T,  x_ls, row_blocks=10, col_blocks=10, alpha=1.0, tol=1e-5):
+def treabk_algorithm(A, B, T,  x_ls, row_blocks=10, col_blocks=10, alpha=1.0, tau=10, sequential =True, tol=1e-5):
     """
     Tensor Randomized Extended Average Block Kaczmarz (TREABK).
     Uses t-product throughout.
@@ -208,9 +208,11 @@ def treabk_algorithm(A, B, T,  x_ls, row_blocks=10, col_blocks=10, alpha=1.0, to
     X = torch.zeros(n, k, p, dtype=A.dtype, device=A.device)
     Z = B.clone()
 
-    #  Partitions:
-    I_blocks = torch.tensor_split(torch.arange(m, device=A.device), row_blocks)
-    J_blocks = torch.tensor_split(torch.arange(n, device=A.device), col_blocks)
+    # #  Partitions:
+    # I_blocks = torch.tensor_split(torch.arange(m, device=A.device), row_blocks)
+    # J_blocks = torch.tensor_split(torch.arange(n, device=A.device), col_blocks)
+    I_blocks = make_partitions(m, s=row_blocks, tau=tau, sequential= sequential)
+    J_blocks = make_partitions(n, s=col_blocks, tau=tau, sequential= sequential)
 
     # Compute row norms: ||A_{I,:,:}||_F^2
     row_norms_sq_list = []
@@ -450,10 +452,12 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
     assert (m == mB) and (p == pB), "Need A:(m,n,p), B:(m,k,p)"
     assert 0.0 < delta <= 1.0, "delta must be in (0,1]"
 
-    # Default deterministic partitions if not provided
+    # Default deterministic partitions if not provided. Randomly shuffled
+    # with  size ~=10
     if row_partitions is None:
-        row_partitions = make_partitions(m, s=min(10, m))
+        row_partitions = make_partitions(m, s=10, sequential=False)
 
+    # row_partitions = make_partitions(m, s=len(row_partitions), sequential=sequential)
     # Initialize
     X = torch.zeros(n, k, p, dtype=A.dtype, device=A.device)
     Z = B.clone()
@@ -573,8 +577,8 @@ def tegbk_algorithm(A, B, T, x_ls, alpha=1.0, delta=0.9, tol=1e-5):
     >>> print(f"Converged in {iters} iterations, runtime: {runtime:.4f} seconds")
     Converged in 52 iterations, runtime: 1.987  
     """
-    m, n, p = A.shape
-    m_b, k, p_b = B.shape
+    _, n, p = A.shape
+    _, k, p_b = B.shape
 
     X = torch.zeros(n, k, p, dtype=A.dtype, device=A.device)
     Z = B.clone()
