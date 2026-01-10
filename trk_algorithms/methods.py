@@ -7,25 +7,48 @@ Implementation of Tensor Randomized Kaczmarz Algorithms
 import time
 import torch
 import numpy as np
+from contextlib import nullcontext
 
 
-from tensor_toolbox.config import device, DTYPE
+from tensor_toolbox.config import DTYPE, device as _DEVICE
 from tensor_toolbox.tensorLinalg import (
     t_product,
     t_transpose,
     t_frobenius_norm,
     t_pinv_apply,
-    tube_tpinv
 )
 from trk_algorithms.utils import (
     make_partitions,
     partitions_to_torch,
-    rel_se
+    rel_se,
+    as_torch_device,
 )
 
 from trk_algorithms.config import SEED
 
 
+# Normalize device:
+_DEFAULT_DEVICE = as_torch_device(_DEVICE)
+device = _DEFAULT_DEVICE
+
+_TORCH_GEN_CPU = torch.Generator(device="cpu")
+_TORCH_GEN_CPU.manual_seed(int(SEED))
+
+
+def _seed_context(seed: int | None, tensor_device: torch.device):
+    """
+    Fork RNG state so internal seeding doesn't clobber global RNG.
+
+    If tensor_device is CUDA, also forks CUDA RNG state for that device.
+    """
+    if seed is None:
+        return nullcontext()
+
+    dev = as_torch_device(tensor_device)
+    devices = [dev] if dev.type == "cuda" else []
+    return torch.random.fork_rng(devices=devices)
+
+# _NP_RNG = np.random.default_rng(int(SEED))
 
 # ---------- Methods from the paper: 
 #  Tensor randomized extended Kaczmarz methods for large 
@@ -39,7 +62,7 @@ from trk_algorithms.config import SEED
 #  1. Tensor Randomized Extended Kaczmarz
 # -----------------------------------------
 
-def trek_algorithm(A, B, T, x_ls, tol=1e-5):
+def trek_algorithm(A, B, T, x_ls, tol=1e-5, seed: int | None = SEED):
     """
     Tensor randomized extended Kaczmarz algorithm.
     A tensor version of the Randomized Extended Kaczmarz (REK) method.
@@ -96,8 +119,6 @@ def trek_algorithm(A, B, T, x_ls, tol=1e-5):
     >>> plt.grid()
     >>> plt.show()
     """
-    torch.manual_seed(SEED)
-
     m, n, p = A.shape
     m_b, k, p_b = B.shape
 
@@ -129,43 +150,47 @@ def trek_algorithm(A, B, T, x_ls, tol=1e-5):
 
 
     t0 = time.time()
-    for iter_k in range(T):
+    with _seed_context(seed, A.device):
+        if seed is not None:
+            torch.manual_seed(int(seed))
+
+        for iter_k in range(T):
 
         # =======================================================
         # Z-update (column step)
         # Pick j with prob ||A(:,j,:)||_F^2 / ||A||_F^2
         # =======================================================
-        j = int(torch.multinomial(p_col, 1).item())
+            j = int(torch.multinomial(p_col, 1).item())
 
         # Update z: Z = Z - A(:,j,:) * (A(:,j,:)^* * A(:,j,:))^† * (A(:,j,:)^* * Z)
-        A_col = A[:, j:j+1, :]              # (m,1,p)
-        trans_A = t_transpose(A_col)        # (1,m,p)  (paper's A_{:,j,:}^*)
-        tmp = t_product(trans_A, Z)         # (1,k,p)
-        denomZ = t_frobenius_norm(A_col) ** 2  # = col_norms_sq[j] #|| A(:, j, :) ||_F^2
-        Z = Z - t_product(A_col, tmp) / (denomZ + 1e-12)   # (m,k,p)
+            A_col = A[:, j:j+1, :]              # (m,1,p)
+            trans_A = t_transpose(A_col)        # (1,m,p)  (paper's A_{:,j,:}^*)
+            tmp = t_product(trans_A, Z)         # (1,k,p)
+            denomZ = t_frobenius_norm(A_col) ** 2  # = col_norms_sq[j] #|| A(:, j, :) ||_F^2
+            Z = Z - t_product(A_col, tmp) / (denomZ + 1e-12)   # (m,k,p)
 
         # =======================================================
         # X-update (row step)
         # Pick i with prob ||A(i,:,:)||_F^2 / ||A||_F^2
         # =======================================================
-        i = int(torch.multinomial(p_row, 1).item())
+            i = int(torch.multinomial(p_row, 1).item())
 
         # Update X: X = X - A_row^* * (A_row * A_row^*)^† * r_i
 
-        A_row = A[i:i+1, :, :]                  # (1,n,p)
-        trans_A_row = t_transpose(A_row)        # (n,1,p)  (paper's A_{i,:,:}^*)
-        A_row_X = t_product(A_row, X)           # (1,k,p)
-        R_I = A_row_X - B[i:i+1, :, :] + Z[i:i+1, :, :]   # (1,k,p)
-        denomX = t_frobenius_norm(A_row) ** 2      # = row_norms_sq[i]  # || A(i, :, :) ||_F^2
-        X = X - t_product(trans_A_row, R_I) / (denomX + 1e-12)
+            A_row = A[i:i+1, :, :]                  # (1,n,p)
+            trans_A_row = t_transpose(A_row)        # (n,1,p)  (paper's A_{i,:,:}^*)
+            A_row_X = t_product(A_row, X)           # (1,k,p)
+            R_I = A_row_X - B[i:i+1, :, :] + Z[i:i+1, :, :]   # (1,k,p)
+            denomX = t_frobenius_norm(A_row) ** 2      # = row_norms_sq[i]  # || A(i, :, :) ||_F^2
+            X = X - t_product(trans_A_row, R_I) / (denomX + 1e-12)
 
         # ----- Monitoring  the RSE  ----------
-        rse = rel_se(X, x_ls)
-        res_hist.append(rse.item())
-        x_hist.append(X.clone())
+            rse = rel_se(X, x_ls)
+            res_hist.append(rse.item())
+            x_hist.append(X.clone())
 
-        if rse < tol:
-            break
+            if rse < tol:
+                break
 
     runtime = time.time() - t0
     X_np = X.detach().cpu().numpy()
@@ -175,7 +200,7 @@ def trek_algorithm(A, B, T, x_ls, tol=1e-5):
 # --------------------------------------------------
 #  2. Tensor Randomized Block Kaczmarz
 # ---------------------------------------------------
-def trebk_algorithm(A, B, T, x_ls, row_partitions=None, col_partitions=None,tol=1e-5):
+def trebk_algorithm(A, B, T, x_ls, row_partitions=None, col_partitions=None, tol=1e-5, seed: int | None = SEED):
     """
     Tensor Randomized Extended Block Kaczmarz (TREBK) algorithm.
 
@@ -257,41 +282,45 @@ def trebk_algorithm(A, B, T, x_ls, row_partitions=None, col_partitions=None,tol=
     x_hist = []
 
     t0 = time.time()
-    for iter_k in range(T):
+    with _seed_context(seed, A.device):
+        if seed is not None:
+            torch.manual_seed(int(seed))
+
+        for iter_k in range(T):
 
         # =======================================================
         # Z-update (column block step)
         # Pick j in [t] with prob ||A(:,J,:)||_F^2 / ||A||_F^2
         # =======================================================
-        j = int(torch.multinomial(p_col, 1).item())
-        J = col_partitions[j]
+            j = int(torch.multinomial(p_col, 1).item())
+            J = col_partitions[j]
 
         # Update z: Z = Z - A(:,J,:) * (A(:,J,:)^T * A(:,J,:))^† *  Z)
-        A_J = A[:, J, :]                     # (m, |J|, p)
-        # A_J_T = t_transpose(A_J)             # (|J|, m, p)
-        AJZ = t_pinv_apply(A_J, Z)           # (|J|, k, p)
-        Z = Z - t_product(A_J, AJZ)          # (m,k,p)
+            A_J = A[:, J, :]                     # (m, |J|, p)
+            # A_J_T = t_transpose(A_J)             # (|J|, m, p)
+            AJZ = t_pinv_apply(A_J, Z)           # (|J|, k, p)
+            Z = Z - t_product(A_J, AJZ)          # (m,k,p)
 
         # =======================================================
         # X-update (row block step)
         # Pick i in [s] with prob ||A(I,:,: )||_F^2 / ||A||_F^2
         # =======================================================
-        i = int(torch.multinomial(p_row, 1).item())
-        I = row_partitions[i]
+            i = int(torch.multinomial(p_row, 1).item())
+            I = row_partitions[i]
 
         # Update X: X = X - A_I^T * (A_I * A_I^T)^† * r_I
-        A_I = A[I, :, :]                      # (|I|, n, p)
-        A_I_X = t_product(A_I, X)             # (|I|, k, p)
-        R_I = A_I_X - B[I, :, :] + Z[I, :, :] # (|I|, k, p)
-        step = t_pinv_apply(A_I, R_I)         # (n, k, p)
-        X = X - step
+            A_I = A[I, :, :]                      # (|I|, n, p)
+            A_I_X = t_product(A_I, X)             # (|I|, k, p)
+            R_I = A_I_X - B[I, :, :] + Z[I, :, :] # (|I|, k, p)
+            step = t_pinv_apply(A_I, R_I)         # (n, k, p)
+            X = X - step
 
         # ----- Monitoring  the RSE  ----------
-        rse = rel_se(X, x_ls)
-        res_hist.append(rse.item())
-        x_hist.append(X.clone())
-        if rse < tol:
-            break
+            rse = rel_se(X, x_ls)
+            res_hist.append(rse.item())
+            x_hist.append(X.clone())
+            if rse < tol:
+                break
     runtime = time.time() - t0
     #  Mets X en numpy
     X_np = X.detach().cpu().numpy()
@@ -302,7 +331,7 @@ def trebk_algorithm(A, B, T, x_ls, row_partitions=None, col_partitions=None,tol=
 #  3. Tensor Randomized Extended Greedy Block Kaczmarz
 # ----------------------------------------------------
 def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
-                     tol=1e-5, rcond=1e-12, seed=0):
+                     tol=1e-5, rcond=1e-12, seed: int | None = SEED):
     """
     Tensor randomized extended greedy block Kaczmarz (TREGBK).
 
@@ -316,7 +345,7 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
     row_partitions: list of LongTensor index blocks (partition of rows). If None: 10 blocks.
     tol: stopping tolerance on relative residual ||B - A*X||_F / ||B||_F
     rcond: rcond for slice-wise pinv
-    seed: RNG seed
+    seed: RNG seed. Use None to disable internal seeding.
     store_hist: store X at each iteration (can be large)
 
     Returns
@@ -348,42 +377,44 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
     >>> print(f"Converged in {iters} iterations, runtime: {runtime:.4f} seconds")
     Converged in 57 iterations, runtime: 3.1234 seconds
     """
-    torch.manual_seed(seed)
+    with _seed_context(seed, A.device):
+        if seed is not None:
+            torch.manual_seed(int(seed))
 
-    m, n, p = A.shape
-    mB, k, pB = B.shape
-    assert (m == mB) and (p == pB), "Need A:(m,n,p), B:(m,k,p)"
-    assert 0.0 < delta <= 1.0, "delta must be in (0,1]"
+        m, n, p = A.shape
+        mB, k, pB = B.shape
+        assert (m == mB) and (p == pB), "Need A:(m,n,p), B:(m,k,p)"
+        assert 0.0 < delta <= 1.0, "delta must be in (0,1]"
 
     # Default deterministic partitions if not provided. Randomly shuffled
     # with  size ~=10
-    if row_partitions is None:
-        row_partitions = make_partitions(m, s=10, sequential=False)
-        # Convertis les partitions en torch.long
-        row_partitions = partitions_to_torch(row_partitions, device=device)
-    else:
-        #  Convertis les indices des partitions en torch.long
-        row_partitions = partitions_to_torch(row_partitions, device=device)
+        if row_partitions is None:
+            row_partitions = make_partitions(m, s=10, sequential=False)
+            # Convertis les partitions en torch.long
+            row_partitions = partitions_to_torch(row_partitions, device=device)
+        else:
+            #  Convertis les indices des partitions en torch.long
+            row_partitions = partitions_to_torch(row_partitions, device=device)
 
 
     # Row-block probabilities: ||A_{I_i,:,:}||_F^2 / ||A||_F^2
-    row_norms_sq = torch.sum(A**2, dim=(1, 2)).to(torch.float32)  # (m,)
-    block_norms  = torch.stack([row_norms_sq[I].sum() for I in row_partitions]).to(A.device) # (s,)
-    prob_blocks = (block_norms / block_norms.sum()).to(torch.float32 )  # (s,)  
+        row_norms_sq = torch.sum(A**2, dim=(1, 2)).to(torch.float32)  # (m,)
+        block_norms  = torch.stack([row_norms_sq[I].sum() for I in row_partitions]).to(A.device) # (s,)
+        prob_blocks = (block_norms / (block_norms.sum() + 1e-12)).to(torch.float32 )  # (s,)
 
     #  Precompute A^T 
-    At = t_transpose(A) # (n,m,p)
+        At = t_transpose(A) # (n,m,p)
 
     # Initialize
-    X = torch.zeros(n, k, p, dtype=DTYPE, device=A.device)
-    Z = B.clone()
+        X = torch.zeros(n, k, p, dtype=DTYPE, device=A.device)
+        Z = B.clone()
 
-    res_hist = []
-    x_hist = []
+        res_hist = []
+        x_hist = []
 
 
-    t0 = time.time()
-    for iter_k in range(T):
+        t0 = time.time()
+        for iter_k in range(T):
 
         # =======================================================
         # 1) Greedy column-block selection tau_k using current Z
@@ -393,52 +424,52 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
         # I must vectorize this loop.  I noticed an error in this algorithm description in the paper.
         # They ddefinee || A(:,j,:)*Z||_F^2, which is incorrect.
         # Vectorize version of the  this loop
-        AtZ  = t_product(At, Z)                    # (n,k,p) = (n,m,p) * (m,k,p)
-        Atz_norms_sq = torch.sum(AtZ**2, dim=(1,2)).to(torch.float32)  # (n,)
-        eps = delta * torch.max(Atz_norms_sq)
-        tau = torch.where(Atz_norms_sq >= eps)[0]
+            AtZ  = t_product(At, Z)                    # (n,k,p) = (n,m,p) * (m,k,p)
+            Atz_norms_sq = torch.sum(AtZ**2, dim=(1,2)).to(torch.float32)  # (n,)
+            eps = delta * torch.max(Atz_norms_sq)
+            tau = torch.where(Atz_norms_sq >= eps)[0]
        
         # =======================================================
         # 5) Z update: Z <- Z - A_{:,tau,:} * (A_{:,tau,:})^† * Z
         # =======================================================
-        A_tau = A[:, tau, :]                            # (m, |tau|, p)
-        A_tau_Z = t_pinv_apply(A_tau, Z, rcond=rcond)   # (|tau|, k, p)
-        Z = Z - t_product(A_tau, A_tau_Z)               # (m, k, p)
+            A_tau = A[:, tau, :]                            # (m, |tau|, p)
+            A_tau_Z = t_pinv_apply(A_tau, Z, rcond=rcond)   # (|tau|, k, p)
+            Z = Z - t_product(A_tau, A_tau_Z)               # (m, k, p)
 
         # =======================================================
         # 6) Pick a row-block I_i with probability ||A_I||_F^2 / ||A||_F^2
         # =======================================================
-        i = int(torch.multinomial(prob_blocks, 1).item())
-        I = row_partitions[i]
+            i = int(torch.multinomial(prob_blocks, 1).item())
+            I = row_partitions[i]
 
         # =======================================================
         # 7) X update : X <- X - (A_I)^† * (A_I*X - B_I + Z_I)
         # =======================================================
-        A_I = A[I, :, :]                                    # (|I|, n, p)
-        A_I_X = t_product(A_I, X)                           # (|I|, k, p)
-        R_I = A_I_X - B[I, :, :] + Z[I, :, :]               # (|I|, k, p)
-        step = t_pinv_apply(A_I, R_I, rcond=rcond)          # (n, k, p)
-        X = X - step
+            A_I = A[I, :, :]                                    # (|I|, n, p)
+            A_I_X = t_product(A_I, X)                           # (|I|, k, p)
+            R_I = A_I_X - B[I, :, :] + Z[I, :, :]               # (|I|, k, p)
+            step = t_pinv_apply(A_I, R_I, rcond=rcond)          # (n, k, p)
+            X = X - step
 
         #  -------- Monitoring  the RSE  ----------
-        assert x_ls is not None, "x_ls (least-square solution) must be provided for RSE computation."
+            assert x_ls is not None, "x_ls (least-square solution) must be provided for RSE computation."
 
-        rse = rel_se(X, x_ls)
-        res_hist.append(rse.item())
+            rse = rel_se(X, x_ls)
+            res_hist.append(rse.item())
 
-        x_hist.append(X.clone())
+            x_hist.append(X.clone())
 
         #  Check convergence
-        if rse < tol:
-            break
+            if rse < tol:
+                break
 
-    runtime = time.time() - t0
+        runtime = time.time() - t0
 
     # Convert final X to CPU numpy array
-    X_np = X.detach().cpu().numpy()
-    x_hist_np = np.stack([xx.detach().cpu().numpy() for xx in x_hist], axis=0)
+        X_np = X.detach().cpu().numpy()
+        x_hist_np = np.stack([xx.detach().cpu().numpy() for xx in x_hist], axis=0)
 
-    return (X_np, iter_k + 1, np.array(res_hist), x_hist_np), runtime
+        return (X_np, iter_k + 1, np.array(res_hist), x_hist_np), runtime
 
 
 # ---------- -------------------------
@@ -453,7 +484,7 @@ def tregbk_algorithm(A, B, T, x_ls, delta=0.9, row_partitions=None,
 #  Tensor Randomized Extended Average Block Kaczmarz
 # -----------------------------------------
 
-def treabk_algorithm(A, B, T,  x_ls, row_partitions=None, col_partitions=None, alpha=1.0, tol=1e-5):
+def treabk_algorithm(A, B, T,  x_ls, row_partitions=None, col_partitions=None, alpha=1.0, tol=1e-5, seed: int | None = SEED):
     """
     Tensor Randomized Extended Average Block Kaczmarz (TREABK).
     Uses t-product throughout.
@@ -526,25 +557,21 @@ def treabk_algorithm(A, B, T,  x_ls, row_partitions=None, col_partitions=None, a
         J_blocks = partitions_to_torch(col_partitions, device=A.device)
 
     
-    #  ---------------- precompute row and column norms  ----------------
-    # Column norms: ||A_{:,J,:}||_F^2
-    col_norms_sq = torch.zeros(len(J_blocks), dtype=A.dtype, device=A.device)
-    #  Row norms: ||A_{I,:,:}||_F^2
-    row_norms_sq = torch.zeros(len(I_blocks), dtype=A.dtype, device=A.device)
+    #  ---------------- precompute row and column block norms  ----------------
+    # Correct norms: ||A_{:,J,:}||_F^2 and ||A_{I,:,:}||_F^2
+    col_block_norms = torch.stack([(A[:, J, :] ** 2).sum() for J in J_blocks]).to(torch.float32)  # (t,)
+    row_block_norms = torch.stack([(A[I, :, :] ** 2).sum() for I in I_blocks]).to(torch.float32)  # (s,)
 
-    # ---------------- block norms computation  ----------------
-    #  Column block norms
-    col_block_norms = torch.stack([col_norms_sq[J].sum() for J in J_blocks]).to(A.device)  # (t,)
-    #  Row block norms
-    row_block_norms = torch.stack([row_norms_sq[I].sum() for I in I_blocks]).to(A.device)  # (s,)
+    total_norm = (A ** 2).sum().to(torch.float32) + 1e-12
 
-    total_norm = (A**2).sum().to(torch.float32) #= col_block_norms.sum()  # == row_block_norms.sum()
-    #  ---------------- end precompute row and column norms  ----------------
+    prob_cols = col_block_norms / total_norm
+    prob_rows = row_block_norms / total_norm
 
-    # ---------------- compute row and column probabilities  ----------------
-    prob_cols = col_block_norms / (total_norm + 1e-12)  # (t,)
-    prob_rows = row_block_norms / (total_norm + 1e-12)  # (s,)
-    # ---------------- end compute row and column probabilities  ----------------
+    # Defensive: ensure valid multinomial weights
+    prob_cols = torch.clamp(prob_cols, min=0)
+    prob_rows = torch.clamp(prob_rows, min=0)
+    prob_cols = prob_cols / (prob_cols.sum() + 1e-12)
+    prob_rows = prob_rows / (prob_rows.sum() + 1e-12)
 
     #  Initialize row and column norms for blocks
     X = torch.zeros(n, k, p, dtype=A.dtype, device=A.device)  # (n,k,p) 
@@ -554,47 +581,51 @@ def treabk_algorithm(A, B, T,  x_ls, row_partitions=None, col_partitions=None, a
     x_hist = []
 
     t0 = time.time()
-    for iter_k in range(T):
+    with _seed_context(seed, A.device):
+        if seed is not None:
+            torch.manual_seed(int(seed))
+
+        for iter_k in range(T):
         # Column step: pick j in [t] with probability prop to ||A_{:,j,:}||_F^2
 
-        j = torch.multinomial(prob_cols, 1).item()
-        J = J_blocks[j]
-        AJ = A[:, J, :]                       # (m, n, p)
+            j = torch.multinomial(prob_cols, 1).item()
+            J = J_blocks[j]
+            AJ = A[:, J, :]                       # (m, n, p)
 
         # Update  Z = Z - alpha * A_col *_t (A_col^T_t * Z) / ||A_col||_F^2
         # A_col_trans = t_transpose(AJ)            # (n, m, p)
         # Atz = t_product(A_col_trans, Z)       
-        Atz = t_product(t_transpose(AJ), Z)        # (|J|, k, p)
-        AZ = t_product(AJ, Atz)                    # (m, k, p)
-        denomZ =( t_frobenius_norm(AJ)**2 + 1e-12)     #=col_norms_sq[j] + 1e-12
-        Z = Z - alpha * AZ / denomZ
+            Atz = t_product(t_transpose(AJ), Z)        # (|J|, k, p)
+            AZ = t_product(AJ, Atz)                    # (m, k, p)
+            denomZ =( t_frobenius_norm(AJ)**2 + 1e-12)     #=col_norms_sq[j] + 1e-12
+            Z = Z - alpha * AZ / denomZ
 
         # Row step: pick i in [s]  with probability prop to ||A_{i,:,:}||_F^2
-        i = torch.multinomial(prob_rows, 1).item()
-        I = I_blocks[i]
-        A_I = A[I, :, :]                     # ({I|}, n, p)
+            i = torch.multinomial(prob_rows, 1).item()
+            I = I_blocks[i]
+            A_I = A[I, :, :]                     # ({I|}, n, p)
 
         # X update: X = X - alpha * A_row^T_t *  r_i / ||A_row||_F^2
 
-        AX_I = t_product(A_I, X)                 # (|I|, k, p)
-        RI = AX_I - B[I, :, :] + Z[I, :, :]      # (|I|, k, p)
+            AX_I = t_product(A_I, X)                 # (|I|, k, p)
+            RI = AX_I - B[I, :, :] + Z[I, :, :]      # (|I|, k, p)
 
         # X update: X = X - alpha * A_row^T_t *_t r_i / ||A_row||_F^2
-        grad = t_product(t_transpose(A_I), RI)  # (n, k, p)
-        denomX = (t_frobenius_norm(A_I)**2 + 1e-12)   # = row_norms_sq[i] + 1e-12
+            grad = t_product(t_transpose(A_I), RI)  # (n, k, p)
+            denomX = (t_frobenius_norm(A_I)**2 + 1e-12)   # = row_norms_sq[i] + 1e-12
 
-        X = X - alpha * (grad / denomX)
+            X = X - alpha * (grad / denomX)
 
         #  Monitor the RSE: exigere x_ls
-        assert x_ls is not None, "x_ls (least-square solution) must be provided for RSE computation."
+            assert x_ls is not None, "x_ls (least-square solution) must be provided for RSE computation."
 
-        rse = rel_se(X, x_ls)
-        res_hist.append(rse.item())
-        x_hist.append(X.clone())
+            rse = rel_se(X, x_ls)
+            res_hist.append(rse.item())
+            x_hist.append(X.clone())
 
         #  Convergence test:
-        if rse < tol:
-            break
+            if rse < tol:
+                break
 
     runtime = time.time() - t0
 
