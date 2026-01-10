@@ -17,7 +17,7 @@ Docstring for trk_algorithms.utils
 import torch
 import numpy as np
 
-from tensor_toolbox.config import DTYPE, device
+from tensor_toolbox.config import DTYPE, device as _DEVICE
 from tensor_toolbox.tensorLinalg import (
     t_frobenius_norm,
     t_pinv_apply,
@@ -27,14 +27,31 @@ from tensor_toolbox.tensorLinalg import (
 from trk_algorithms.config import SEED
 
 
-def make_partitions(n, s=None, tau=2, sequential=True):
+
+def as_torch_device(dev) -> torch.device:
+    """
+    Normalize device from external config (str/torch.device) to torch.device.
+    """
+    if isinstance(dev, torch.device):
+        return dev
+    return torch.device(dev)
+
+# Normalize device:
+_DEFAULT_DEVICE = as_torch_device(_DEVICE)
+device = _DEFAULT_DEVICE
+
+_TORCH_GEN_CPU = torch.Generator(device="cpu")
+_TORCH_GEN_CPU.manual_seed(int(SEED))
+
+_NP_RNG = np.random.default_rng(int(SEED))
+
+def make_partitions(n, s=None, tau=2, sequential=True, rng=None):
     """
     Create a partitions of the set of indices {0, ..., n-1} into s disjoint subsets.
     If random is True, the partitions are created randomly.
     Otherwise, the partitions are created sequentially, following the paper 
     "Randomized Block Extended Kaczmarz" by Due et al (2024), that is partitions have the same size tau and are formed as
-     I_i  is formed as  I_i = {(i-1)tau +1, (i-1)tau +2, ..., i*tau} for i=1,...,s-1 and I_s = {(s-1)tau +1, ..., n}.
-
+     I_i = {itau,..., min((i+1)tau-1, n)-1} for i=0,...,s-1.
     Parameters:
     n (int): Total number of indices.
     s (int, optional): Number of partitions. If None, it is computed as ceil(n/tau).
@@ -68,11 +85,6 @@ def make_partitions(n, s=None, tau=2, sequential=True):
     """
     assert n > 0 and isinstance(n, int), "n must be a positive integer."
     assert tau > 0 and isinstance(tau, int), "tau must be a positive integer."
-    # assert s is None or (s > 0 and isinstance(
-    #     s, int)), "s must be a positive integer or None."
-    # assert tau <= n, "tau must be less than or equal to n."
-    # assert s is None or tau * \
-    #     s <= n, "tau * s must be less than or equal to n."
     assert sequential in [True, False], "sequential must be a boolean value."
 
     #  Numpy implementation
@@ -89,36 +101,24 @@ def make_partitions(n, s=None, tau=2, sequential=True):
         for i in range(s):
             start = i * tau
             end = min( (i+1) * tau, n )
-
             if start < n:
                 part = list(range(start, end))
                 parts.append(part)
         return parts
     
     # If sequential is False, create random partitions
-    rng = np.random.default_rng(seed=SEED)
-    indices = rng.permutation(n)
+    # rng = np.random.default_rng(seed=SEED)
+    # indices = rng.permutation(n)
     if s is None:
         # Determine number of partitions based on tau
         s = int(np.ceil(n / tau))
-        partitions = np.array_split(indices, s)
     else:
-        partitions = np.array_split(indices, s)
+        assert s >= 1
+    rng = _NP_RNG if rng is None else rng
+    indices = rng.permutation(n)
+    partitions = np.array_split(indices, s)
     return [parts.tolist() for parts in partitions]
 
-    # if sequential:
-    #     partitions = [[(i - 1)*tau + j for j in range(1, tau + 1)]
-    #                   for i in range(0, s)]
-
-    #     return partitions
-    # else:
-    #     # Randonmly generate s partitions of {0, ..., n-1}of not (necessarily) equal size
-
-    #     indices = np.random.permutation(n)
-    #     #  Partitiion the indices into s disjoint subsets of  not (necessarily) equal size
-    #     partitions = np.array_split(indices, s)
-
-    # return partitions
 
 def partitions_to_torch(parts, device):
     """
@@ -166,7 +166,7 @@ def rel_se(X, X_ref):
 # ------------------------------------------------------
 #  Make tensor problems for testing
 # ------------------------------------------------------
-def make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=SEED, dtype=DTYPE, device=device):
+def make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, generator=None):
     """
     Build an inconsistent t-linear system:
       B = A * X_true + noise
@@ -178,9 +178,9 @@ def make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=SEED, dtype=DTYP
     p: int. tubal dimension
     q: int. number of right-hand sides
     noise: float. noise level
-    seed: int. random seed
-    dtype: torch.dtype. data type
-    device: torch.device. device to use
+    generator: torch.Generator. random number generator
+    
+
 
     Returns:
     --------
@@ -199,16 +199,20 @@ def make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=SEED, dtype=DTYP
     torch.Size([120, 4, 8])
     """
 
-    # if device is None:
-    #     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    torch.manual_seed(seed)
+    if generator is None:
+        # generator = _TORCH_GEN_CPU
+        g = torch.Generator(device="cpu")
+        g.manual_seed(int(SEED))
+    else:
+        g = generator
 
-    A = torch.randn(m, n, p, device=device, dtype=dtype)
-    X_true = torch.randn(n, q, p, device=device, dtype=dtype)
+
+    A = torch.randn(m, n, p, device='cpu', dtype=DTYPE, generator=g).to(device)
+    X_true = torch.randn(n, q, p, device='cpu', dtype=DTYPE, generator=g).to(device)
 
     B_cons = t_product(A, X_true)
-    B_incons = B_cons + noise * \
-        torch.randn(m, q, p, device=device, dtype=dtype)
+    # noise_term = torch.randn(m, q, p, device="cpu", dtype=DTYPE, generator=g).to(device)
+    B_incons = B_cons + noise * torch.randn(m, q, p, device='cpu', dtype=DTYPE, generator=g).to(device)
     X_ls = t_pinv_apply(A, B_incons)
 
     return A, X_ls, B_incons
