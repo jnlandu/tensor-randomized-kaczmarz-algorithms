@@ -164,7 +164,7 @@ def trek_algorithm(A, B, T, x_ls, tol=1e-5, pinv_tol=1e-12, seed=SEED):
 #  Tensor Randomized Extended Average Block Kaczmarz
 # -----------------------------------------
 
-def treabk_algorithm(A, B, T,  x_ls, row_blocks=10, col_blocks=10, alpha=1.0, tau=10, sequential =True, tol=1e-5):
+def treabk_algorithm(A, B, T,  x_ls, row_partitions=None, col_partitions=None, alpha=1.0, tol=1e-5):
     """
     Tensor Randomized Extended Average Block Kaczmarz (TREABK).
     Uses t-product throughout.
@@ -186,6 +186,8 @@ def treabk_algorithm(A, B, T,  x_ls, row_blocks=10, col_blocks=10, alpha=1.0, ta
     x_hist: X history
     runtime: float. time taken to run the algorithm.
 
+
+
     Example:
     --------
     >>> A, X_ls, B = make_tensor_problem(m=120, n=80, p=8, q=4, noise=0.05, seed=42)
@@ -204,74 +206,114 @@ def treabk_algorithm(A, B, T,  x_ls, row_blocks=10, col_blocks=10, alpha=1.0, ta
     """
     m, n, p = A.shape
     m_b, k, p_b = B.shape
+    assert m == m_b, "First dimensions of A and B must match."
     assert p == p_b, "Third dimensions must match"
 
     X = torch.zeros(n, k, p, dtype=A.dtype, device=A.device)
     Z = B.clone()
 
-    # #  Partitions:
-    # I_blocks = torch.tensor_split(torch.arange(m, device=A.device), row_blocks)
-    # J_blocks = torch.tensor_split(torch.arange(n, device=A.device), col_blocks)
-    I_blocks = make_partitions(m, s=row_blocks, tau=tau, sequential= sequential)
-    J_blocks = make_partitions(n, s=col_blocks, tau=tau, sequential= sequential)
+    #  --------- partitions  ----------
+    if row_partitions is None:
+        row_blocks = 2
+        I_blocks = make_partitions(m, s=row_blocks, tau=2, sequential= False)
+        I_blocks = partitions_to_torch(I_blocks, device=A.device)
+    else:
+        I_blocks = partitions_to_torch(row_partitions, device=A.device)
+    
+    if col_partitions is None:
+        #  If the col_partitions is not provided, default to 2  random blokcs of size 2
+        col_blocks = 2
+        J_blocks = make_partitions(n, s=col_blocks, tau=2, sequential= False)
+        J_blocks = partitions_to_torch(J_blocks, device=A.device)
+    else:
+        J_blocks = partitions_to_torch(col_partitions, device=A.device)
+
+    
+    #  ---------------- precompute row and column norms  ----------------
+    # Column norms: ||A_{:,J,:}||_F^2
+    col_norms_sq = torch.zeros(len(J_blocks), dtype=A.dtype, device=A.device)
+    #  Row norms: ||A_{I,:,:}||_F^2
+    row_norms_sq = torch.zeros(len(I_blocks), dtype=A.dtype, device=A.device)
+
+    # ---------------- block norms computation  ----------------
+    #  Column block norms
+    col_block_norms = torch.stack([col_norms_sq[J].sum() for J in J_blocks]).to(A.device)  # (t,)
+    #  Row block norms
+    row_block_norms = torch.stack([row_norms_sq[I].sum() for I in I_blocks]).to(A.device)  # (s,)
+
+    total_norm = (A**2).sum().to(torch.float32) #= col_block_norms.sum()  # == row_block_norms.sum()
+    #  ---------------- end precompute row and column norms  ----------------
+
+    # ---------------- compute row and column probabilities  ----------------
+    prob_cols = col_block_norms / (total_norm + 1e-12)  # (t,)
+    prob_rows = row_block_norms / (total_norm + 1e-12)  # (s,)
+    # ---------------- end compute row and column probabilities  ----------------
+
+    #  Initialize row and column norms for blocks
+    X = torch.zeros(n, k, p, dtype=A.dtype, device=A.device)  # (n,k,p) 
+    Z = B.clone()  # (m,k,p)
 
     # Compute row norms: ||A_{I,:,:}||_F^2
-    row_norms_sq_list = []
-    for I in I_blocks:
-        row_norms_sq_list.append((A[I, :, :] * A[I, :, :]).sum())
-    row_norms_sq = torch.stack(row_norms_sq_list).to(A.device) + 1e-12
+    # row_norms_sq_list = []
+    # for I in I_blocks:
+    #     row_norms_sq_list.append((A[I, :, :] * A[I, :, :]).sum())
+    # row_norms_sq = torch.stack(row_norms_sq_list).to(A.device) + 1e-12
 
-    # Compute column norms: ||A_{:,J,:}||_F^2
-    col_norms_sq_list = []
-    for J in J_blocks:
-        col_norms_sq_list.append((A[:, J, :] * A[:, J, :]).sum())
-    col_norms_sq = torch.stack(col_norms_sq_list).to(A.device) + 1e-12
+    # # Compute column norms: ||A_{:,J,:}||_F^2
+    # col_norms_sq_list = []
+    # for J in J_blocks:
+    #     col_norms_sq_list.append((A[:, J, :] * A[:, J, :]).sum())
+    # col_norms_sq = torch.stack(col_norms_sq_list).to(A.device) + 1e-12
 
-    # Column probabilities:
-    prob_cols = col_norms_sq / col_norms_sq.sum()
+    # # Column probabilities:
+    # prob_cols = col_norms_sq / col_norms_sq.sum()
 
-    # Row probabilities
-    prob_rows = row_norms_sq / row_norms_sq.sum()
+    # # Row probabilities
+    # prob_rows = row_norms_sq / row_norms_sq.sum()
 
     res_hist = []
     x_hist = []
 
     t0 = time.time()
     for iter_k in range(T):
-        # Column step: pick j with probability prop to ||A_{:,j,:}||_F^2
+        # Column step: pick j in [t] with probability prop to ||A_{:,j,:}||_F^2
 
         j = torch.multinomial(prob_cols, 1).item()
         J = J_blocks[j]
-        AJ = A[:, J, :]  # (m, n, p)
-        A_col_trans = t_transpose(AJ)  # (n, m, p)
-        Atz = t_product(A_col_trans, Z)  # (n, k, p)
+        AJ = A[:, J, :]                       # (m, n, p)
 
-        # denomJ = frob(AJ) + 1e-12
+        # Update  Z = Z - alpha * A_col *_t (A_col^T_t * Z) / ||A_col||_F^2
+        # A_col_trans = t_transpose(AJ)            # (n, m, p)
+        # Atz = t_product(A_col_trans, Z)       
+        Atz = t_product(t_transpose(AJ), Z)        # (|J|, k, p)
+        AZ = t_product(AJ, Atz)                    # (m, k, p)
+        denomZ =( t_frobenius_norm(AJ)**2 + 1e-12)     #=col_norms_sq[j] + 1e-12
+        Z = Z - alpha * AZ / denomZ
 
-        # Z-update
-        # Z update: Z = Z - alpha * A_col *_t (A_col^T_t *_t Z) / ||A_col||_F^2
-        update = t_product(AJ, Atz)  # (m, k, p)
-        Z = Z - alpha * update / col_norms_sq[j]
-
-        # Row step: pick i with probability prop to ||A_{i,:,:}||_F^2
-        prob_rows = row_norms_sq / row_norms_sq.sum()
+        # Row step: pick i in [s]  with probability prop to ||A_{i,:,:}||_F^2
         i = torch.multinomial(prob_rows, 1).item()
         I = I_blocks[i]
-        A_row = A[I, :, :]  # (m, n, p)
+        A_I = A[I, :, :]                     # ({I|}, n, p)
 
-        # Compute residual: A_row *_t X - B_i
-        AX = t_product(A_row, X)  # (m, k, p)
-        RI = AX - B[I, :, :] + Z[I, :, :]  # (m, n, p)
+        # X update: X = X - alpha * A_row^T_t *  r_i / ||A_row||_F^2
+
+        AX_I = t_product(A_I, X)                 # (|I|, k, p)
+        RI = AX_I - B[I, :, :] + Z[I, :, :]      # (|I|, k, p)
 
         # X update: X = X - alpha * A_row^T_t *_t r_i / ||A_row||_F^2
-        A_row_trans = t_transpose(A_row)  # (n, m, p)
-        X = X - alpha * t_product(A_row_trans, RI) / row_norms_sq[i]
+        grad = t_product(t_transpose(A_I), RI)  # (n, k, p)
+        denomX = (t_frobenius_norm(A_I)**2 + 1e-12)   # = row_norms_sq[i] + 1e-12
+
+        X = X - alpha * (grad / denomX)
+
+        #  Monitor the RSE: exigere x_ls
+        assert x_ls is not None, "x_ls (least-square solution) must be provided for RSE computation."
 
         rse = rel_se(X, x_ls)
         res_hist.append(rse.item())
-
         x_hist.append(X.clone())
 
+        #  Convergence test:
         if rse < tol:
             break
 
