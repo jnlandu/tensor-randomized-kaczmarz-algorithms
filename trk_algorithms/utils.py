@@ -87,13 +87,21 @@ def make_partitions(n, s=None, tau=2, sequential=True, rng=None):
     assert tau > 0 and isinstance(tau, int), "tau must be a positive integer."
     assert sequential in [True, False], "sequential must be a boolean value."
 
+    if s is not None:
+        assert isinstance(s, int) and s >= 1, "s must be a positive integer."
+
     #  Numpy implementation
     if sequential:
         if s is None:
             s = int(np.ceil(n / tau))
         else:
-            #  Assert that
-            assert tau* (s-1) <= n, "Need tau * (s-1)<= n for remainder block."
+            # Validate that we get exactly s nonempty blocks and cover {0, ..., n-1}.
+            # Condition: (s-1)*tau < n <= s*tau.
+            if s == 1:
+                assert tau >= n, "For s=1, need tau >= n to cover all indices."
+            else:
+                assert (s - 1) * tau < n, "Need (s-1)*tau < n so the last block is nonempty."
+                assert s * tau >= n, "Need s*tau >= n so partitions cover all indices."
 
         #  Create the partitions following Due et al (2024) REBK paper
         #  I_i  is formed as  I_i = {(i-1)tau +1, (i-1)tau +2, ..., i*tau} for i=1,...,s-1 and I_s = {(s-1)tau +1, ..., n}.
@@ -118,6 +126,96 @@ def make_partitions(n, s=None, tau=2, sequential=True, rng=None):
     indices = rng.permutation(n)
     partitions = np.array_split(indices, s)
     return [parts.tolist() for parts in partitions]
+
+
+def tau_range(n: int, s: int, style: str = "sequential", cap_at_n: bool = True):
+    """
+    Return the feasible integer range of ``tau`` for a given ``n`` and ``s``.
+
+    This is mainly meant to answer: “for a fixed problem size ``n`` and a desired
+    number of partitions ``s``, what values of ``tau`` are compatible with the
+    tau-based partitioning logic?”
+
+    For the *sequential* (Due et al. style) blocks used in :func:`make_partitions`,
+    feasibility is equivalent to having exactly ``s`` non-empty blocks with
+    block size ``tau`` (last block may be smaller), i.e.:
+
+    $$ (s-1)\,\tau < n \le s\,\tau $$
+
+    which gives the inclusive bounds:
+
+    $$ \lceil n/s \rceil \le \tau \le \left\lfloor (n-1)/(s-1) \right\rfloor \quad (s>1) $$
+
+    For the *random* style in :func:`make_partitions` when ``s`` is provided,
+    ``tau`` is not used (only ``s`` matters). In that case this function returns
+    ``(1, n)`` by default (or ``(1, None)`` if ``cap_at_n=False``).
+
+    Parameters
+    ----------
+    n:
+        Total number of indices (size of the set {0, ..., n-1}).
+    s:
+        Desired number of partitions.
+    style:
+        One of {"sequential", "random"}.
+    cap_at_n:
+        If True, upper bounds are capped at ``n`` when the theoretical upper
+        bound is unbounded (e.g. ``s=1`` or random style).
+
+    Returns
+    -------
+    (tau_min, tau_max):
+        Inclusive integer bounds for feasible ``tau``. ``tau_max`` may be None
+        if unbounded and ``cap_at_n=False``.
+
+    Raises
+    ------
+    ValueError
+        If inputs are invalid or no feasible ``tau`` exists.
+
+    Examples
+    --------
+    Sequential (tau controls the number of blocks):
+    >>> tau_range(n=80, s=4, style="sequential")
+    (20, 26)
+
+    Random style (tau is ignored when s is provided):
+    >>> tau_range(n=80, s=4, style="random")
+    (1, 80)
+    """
+
+    if not (isinstance(n, int) and n > 0):
+        raise ValueError("n must be a positive integer")
+    if not (isinstance(s, int) and s > 0):
+        raise ValueError("s must be a positive integer")
+
+    style_norm = str(style).strip().lower()
+    if style_norm not in {"sequential", "random"}:
+        raise ValueError('style must be one of {"sequential", "random"}')
+
+    # In random mode (when s is provided), tau is not used by make_partitions.
+    if style_norm == "random":
+        return (1, n) if cap_at_n else (1, None)
+
+    # Sequential mode: tau must yield exactly s non-empty blocks.
+    if s == 1:
+        # Any tau >= n yields a single block covering all indices.
+        tau_min = n
+        tau_max = n if cap_at_n else None
+        return tau_min, tau_max
+
+    # For s > 1, require: (s-1)*tau < n <= s*tau
+    tau_min = int(np.ceil(n / s))
+    tau_max = (n - 1) // (s - 1)
+    if cap_at_n:
+        tau_max = min(tau_max, n)
+
+    if tau_min > tau_max:
+        raise ValueError(
+            f"No feasible tau for n={n}, s={s} under sequential style. "
+            f"Need ceil(n/s) <= floor((n-1)/(s-1)). Got {tau_min}..{tau_max}."
+        )
+    return tau_min, tau_max
 
 
 def partitions_to_torch(parts, device):
@@ -234,13 +332,27 @@ def display_results(method_results):
         - 'final_residual': float, final relative residual
         - 'iterations': int, number of iterations
         
-    Example:
-    --------
+    Examples:
+    ---------
+    Minimal:
+    >>> results = [
+    ...     {'name': 'TREK', 'time': t_trek, 'final_residual': hist_trek[-1], 'iterations': k_trek},
+    ...     {'name': 'TREGBK', 'time': t_tregrebk, 'final_residual': hist_tregrebk[-1], 'iterations': k_tregrebk},
+    ...     {'name': 'TGDBEK _f', 'time': t_tgdbek_f, 'final_residual': hist_tgdbek_f[-1], 'iterations': k_tgdbek_f},
+    ... ]
+    >>> df = display_results(results)
+
+    Full set (include whichever methods you ran):
     >>> results = [
     ...     {'name': 'TREK', 'time': t_trek, 'final_residual': hist_trek[-1], 'iterations': k_trek},
     ...     {'name': 'TREABK', 'time': t_treabk, 'final_residual': hist_treabk[-1], 'iterations': k_treabk},
+    ...     {'name': 'TREB-G', 'time': t_trebg, 'final_residual': hist_trebg[-1], 'iterations': k_trebg},
+    ...     {'name': 'TEGBK', 'time': t_tegbk, 'final_residual': hist_tegbk[-1], 'iterations': k_tegbk},
+    ...     {'name': 'TREGREBK', 'time': t_tregrebk, 'final_residual': hist_tregrebk[-1], 'iterations': k_tregrebk},
+    ...     {'name': 'TGDBEK (Proposed)', 'time': t_tgdbek, 'final_residual': hist_tgdbek[-1], 'iterations': k_tgdbek},
+    ...     {'name': 'TGDBEK (faithful)', 'time': t_tgdbek_f, 'final_residual': hist_tgdbek_f[-1], 'iterations': k_tgdbek_f},
     ... ]
-    >>> display_benchmark_results(results)
+    >>> df = display_results(results)
     """
     import pandas as pd
     
@@ -291,15 +403,30 @@ def plot_convergence(method_histories, figsize=(11, 7), save_path=None):
     save_path: str, optional
         If provided, save the figure to this path (e.g., 'convergence.png').
         
-    Example:
-    --------
+    Examples:
+    ---------
+    Minimal:
     >>> histories = [
-    ...     {'name': 'TREK', 'history': hist_trek, 'iterations': k_trek},
+    ...     {'name': 'TREK', 'history': hist_trek, 'iterations': k_trek, 'marker': 'o'},
     ...     {'name': 'TREGREBK', 'history': hist_tregrebk, 'iterations': k_tregrebk, 'marker': 'd'},
-    ...     {'name': 'TGDBEK (faithful)', 'history': hist_tgdbek_f, 'iterations': k_tgdbek_f, 
+    ...     {'name': 'TGDBEK (faithful)', 'history': hist_tgdbek_f, 'iterations': k_tgdbek_f,
     ...      'linewidth': 2.5, 'linestyle': '--', 'marker': 'd'}
     ... ]
     >>> plot_convergence(histories)
+
+    Full set (include whichever histories you computed):
+    >>> histories = [
+    ...     {'name': 'TREK', 'history': hist_trek, 'iterations': k_trek, 'marker': 'o'},
+    ...     {'name': 'TREABK', 'history': hist_treabk, 'iterations': k_treabk, 'marker': 'o'},
+    ...     {'name': 'TREB-G', 'history': hist_trebg, 'iterations': k_trebg, 'marker': 's'},
+    ...     {'name': 'TEGBK', 'history': hist_tegbk, 'iterations': k_tegbk, 'marker': '^'},
+    ...     {'name': 'TREGREBK', 'history': hist_tregrebk, 'iterations': k_tregrebk, 'marker': 'd'},
+    ...     {'name': 'TGDBEK (Proposed)', 'history': hist_tgdbek, 'iterations': k_tgdbek,
+    ...      'linewidth': 2.5, 'linestyle': '--', 'marker': 'd'},
+    ...     {'name': 'TGDBEK (faithful)', 'history': hist_tgdbek_f, 'iterations': k_tgdbek_f,
+    ...      'linewidth': 2.5, 'linestyle': '--', 'marker': 'd'},
+    ... ]
+    >>> plot_convergence(histories, save_path='tensor_kaczmarz_convergence.png')
     """
     import matplotlib.pyplot as plt
     
