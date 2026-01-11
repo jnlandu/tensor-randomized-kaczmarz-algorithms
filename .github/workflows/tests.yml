@@ -27,6 +27,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
+        # Install build dependencies needed for --no-build-isolation
+        pip install -q setuptools wheel
         # Fallback: pre-install tensor_toolbox from Git since it's not on PyPI yet.
         # Use latest for proper config module; skip build isolation to bypass license validation error
         pip install -q --no-build-isolation "git+https://github.com/jnlandu/tensor-tensor-toolbox-in-python"
