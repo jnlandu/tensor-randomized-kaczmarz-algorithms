@@ -28,7 +28,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         # Fallback: pre-install tensor_toolbox from Git since it's not on PyPI yet.
-        pip install "git+https://github.com/jnlandu/tensor-tensor-toolbox-in-python"
+        pip install -q git+https://github.com/jnlandu/tensor-tensor-toolbox-in-python
         pip install -e ".[test]"
 
     - name: Verify tensor_toolbox import
