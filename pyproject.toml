@@ -41,6 +41,20 @@ classifiers = [
 Homepage = "https://github.com/jnlandu/tensor-randomized-kaczmarz-algorithms"
 Repository = "https://github.com/jnlandu/tensor-randomized-kaczmarz-algorithms"
 
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "matplotlib>=3.5.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "matplotlib>=3.5.0",
+    "pandas",
+    "pylint",
+    "autopep8",
+]
 
 [tool.setuptools]
 package-dir = {"" = "."}
