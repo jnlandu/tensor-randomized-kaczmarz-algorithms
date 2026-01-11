@@ -47,6 +47,7 @@ test = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "matplotlib>=3.5.0",
+    "pandas",
 ]
 dev = [
     "pytest>=7.0.0",
