@@ -14,7 +14,8 @@ authors = [
 ]
 dependencies = [
     # tensor_toolbox is not on PyPI; install from Git commit (PEP 508 URL)
-    "tensor_toolbox @ git+https://github.com/jnlandu/tensor-tensor-toolbox-in-python.git@ded1e12e81735b853b488ac4062eb99f3b1ab08c",
+    "tensor_toolbox @ git+https://github.com/jnlandu/tensor-tensor-toolbox-in-python",
+    
 ]
 
 keywords = [
