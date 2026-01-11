@@ -28,8 +28,29 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         # Fallback: pre-install tensor_toolbox from Git since it's not on PyPI yet.
-        pip install "git+https://github.com/jnlandu/tensor-tensor-toolbox-in-python.git@ded1e12e81735b853b488ac4062eb99f3b1ab08c"
+        pip install "git+https://github.com/jnlandu/tensor-tensor-toolbox-in-python"
         pip install -e ".[test]"
+
+    - name: Verify tensor_toolbox import
+      run: |
+        python - <<'PY'
+        import sys
+        import importlib
+
+        print("Python:", sys.version)
+        print("pip packages (tensor_toolbox):")
+        import subprocess
+        subprocess.run([sys.executable, "-m", "pip", "show", "tensor_toolbox"], check=False)
+
+        try:
+            mod = importlib.import_module("tensor_toolbox.config")
+            print("tensor_toolbox.config imported successfully")
+            print("DTYPE:", getattr(mod, "DTYPE", None))
+            print("device:", getattr(mod, "device", None))
+        except Exception as e:
+            print("FAILED to import tensor_toolbox.config:", e)
+            raise
+        PY
     
     - name: Run tests with pytest
       run: |
